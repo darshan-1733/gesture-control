@@ -16,8 +16,14 @@
     <span class="mark" aria-hidden="true"></span>
     <span class="name">Gesture Control</span>
   </div>
-  <p class="tagline">Hand gestures in, slide and volume control out. Everything runs in this tab.</p>
+  <p class="tagline">Control slides and volume, draw in the air, or beat the computer at Rock-Paper-Scissors. Everything runs in this tab.</p>
 </header>
+
+<nav class="modes" role="tablist" aria-label="Mode">
+  <button class="mode on" role="tab" id="tab-control" aria-selected="true" aria-controls="panel-control" data-mode="control" type="button">Control</button>
+  <button class="mode" role="tab" id="tab-draw" aria-selected="false" aria-controls="panel-draw" data-mode="draw" type="button">Air draw</button>
+  <button class="mode" role="tab" id="tab-game" aria-selected="false" aria-controls="panel-game" data-mode="game" type="button">Rock Paper Scissors</button>
+</nav>
 
 <main>
   <section class="camera" aria-labelledby="cam-h">
@@ -46,12 +52,13 @@
       </label>
       <button class="btn" id="stop" type="button" hidden>Stop camera</button>
     </div>
-    <p class="hint">Turn control on, then hold a gesture for about half a second. Use <b>Open Palm</b> to rest without triggering anything.</p>
+    <p class="hint" id="hint">Turn control on, then hold a gesture for about half a second. Use <b>Open Palm</b> to rest without triggering anything.</p>
   </section>
 
   <section class="stage" aria-labelledby="stage-h">
     <h2 id="stage-h" class="sr">Demo stage</h2>
 
+    <div id="panel-control" role="tabpanel" aria-labelledby="tab-control">
     <div class="deck" aria-live="polite">
       <div class="slides" id="slides"></div>
       <div class="deck-bar">
@@ -79,10 +86,54 @@
       </div>
       <audio id="player" loop></audio>
     </div>
+    </div>
+
+    <div id="panel-draw" role="tabpanel" aria-labelledby="tab-draw" hidden>
+      <div class="paper-wrap">
+        <canvas id="paper" width="640" height="480" aria-label="Drawing canvas"></canvas>
+        <p class="paper-empty" id="paper-empty">Start the camera, then point with one finger to draw.</p>
+      </div>
+      <div class="tools">
+        <span class="swatch" id="swatch" aria-hidden="true"></span>
+        <span class="tool-label" id="swatch-name">Teal</span>
+        <button class="btn" id="paper-color" type="button">Next colour</button>
+        <button class="btn" id="paper-clear" type="button">Clear</button>
+        <button class="btn" id="paper-save" type="button">Save picture</button>
+      </div>
+      <ul class="legend">
+        <li><b>Pointing</b> draw</li>
+        <li><b>Fist</b> lift the pen</li>
+        <li><b>Peace</b> next colour</li>
+        <li><b>Open Palm</b> hold 1 second to clear</li>
+        <li><b>Thumbs Up</b> save picture</li>
+      </ul>
+    </div>
+
+    <div id="panel-game" role="tabpanel" aria-labelledby="tab-game" hidden>
+      <div class="board" aria-live="polite">
+        <div class="score">
+          <div><span class="score-n" id="g-win">0</span><span class="score-l">You</span></div>
+          <div><span class="score-n" id="g-draw">0</span><span class="score-l">Draws</span></div>
+          <div><span class="score-n" id="g-lose">0</span><span class="score-l">Computer</span></div>
+        </div>
+        <div class="call" id="g-call">Ready?</div>
+        <div class="vs" id="g-vs">Press Play round, then show your move when it says Shoot.</div>
+      </div>
+      <div class="tools">
+        <button class="btn primary" id="g-play" type="button">Play round</button>
+        <button class="btn" id="g-reset" type="button">Reset score</button>
+        <span class="tool-label" id="g-seen"></span>
+      </div>
+      <ul class="legend">
+        <li><b>Fist</b> Rock</li>
+        <li><b>Open Palm</b> Paper</li>
+        <li><b>Peace</b> Scissors</li>
+      </ul>
+    </div>
   </section>
 </main>
 
-<section class="guide" aria-labelledby="guide-h">
+<section class="guide" id="guide" aria-labelledby="guide-h">
   <h2 id="guide-h">The five gestures</h2>
   <p class="guide-sub">No camera? Press <b>Try</b> to run the same action a gesture would.</p>
   <div class="table-wrap">
@@ -101,7 +152,7 @@
     <li><b>Smooth.</b> A majority vote over the last 7 frames stops one bad frame from changing the label.</li>
     <li><b>Act.</b> Each gesture can fire at most once per cooldown, so holding Peace advances one slide per second, not thirty.</li>
   </ol>
-  <p class="note">A web page cannot press your computer's volume or arrow keys, so this demo controls the slide deck and audio on this page. The Python desktop version of this project controls the whole system.</p>
+  <p class="note">A web page cannot press your computer's volume or arrow keys, so Control mode drives the slide deck and audio on this page. The Python desktop version of this project controls the whole system.</p>
 </section>
 
 <footer>

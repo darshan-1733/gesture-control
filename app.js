@@ -1,5 +1,7 @@
 import { GESTURES, NO_HAND, UNKNOWN, classify, MajorityVoteSmoother } from "./gestures.js";
 import { GestureController, Deck, DEFAULT_MAP, stepVolume } from "./controller.js";
+import { AirPen, COLORS } from "./draw.js";
+import { RpsGame, MOVES } from "./game.js";
 
 // MediaPipe is loaded on demand so the page itself still works if the CDN is unreachable.
 const MP_VERSION = "0.10.14";
@@ -16,6 +18,13 @@ const el = {
   slides: $("slides"), dots: $("dots"), count: $("count"), prev: $("prev"), next: $("next"),
   meter: $("meter"), fill: $("fill"), volNum: $("vol-num"), volUp: $("vol-up"), volDown: $("vol-down"),
   tone: $("tone"), file: $("file"), player: $("player"), guideBody: $("guide-body"),
+  // version 2: modes
+  modeTabs: [...document.querySelectorAll(".mode")], hint: $("hint"), guide: $("guide"),
+  panelControl: $("panel-control"), panelDraw: $("panel-draw"), panelGame: $("panel-game"),
+  paper: $("paper"), paperEmpty: $("paper-empty"), swatch: $("swatch"), swatchName: $("swatch-name"),
+  paperColor: $("paper-color"), paperClear: $("paper-clear"), paperSave: $("paper-save"),
+  gWin: $("g-win"), gDraw: $("g-draw"), gLose: $("g-lose"), gCall: $("g-call"), gVs: $("g-vs"),
+  gPlay: $("g-play"), gReset: $("g-reset"), gSeen: $("g-seen"),
 };
 
 /* ---------------------------------------------------------------- slides */
@@ -114,6 +123,143 @@ function highlightRow(gesture) {
   for (const row of el.guideBody.children) row.classList.toggle("live", row.dataset.g === gesture);
 }
 
+/* ---------------------------------------------------------------- modes */
+const COLOR_NAMES = ["Teal", "Amber", "Red", "Violet", "White"];
+const HINTS = {
+  control: "Turn control on, then hold a gesture for about half a second. Use <b>Open Palm</b> to rest without triggering anything.",
+  draw: "Point with one finger to draw. A fist lifts the pen. Peace changes colour, a held open palm clears, thumbs up saves.",
+  game: "Press Play round. After the countdown, show <b>Fist</b> (rock), <b>Open Palm</b> (paper) or <b>Peace</b> (scissors).",
+};
+const pen = new AirPen();
+const game = new RpsGame();
+const paper = el.paper.getContext("2d");
+let mode = "control";
+let paperUsed = false;
+
+function setText(node, text) { if (node.textContent !== text) node.textContent = text; }
+
+function setMode(next) {
+  mode = next;
+  for (const b of el.modeTabs) {
+    const on = b.dataset.mode === next;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-selected", String(on));
+  }
+  el.panelControl.hidden = next !== "control";
+  el.panelDraw.hidden = next !== "draw";
+  el.panelGame.hidden = next !== "game";
+  el.guide.hidden = next !== "control";
+  el.hint.innerHTML = HINTS[next];
+  pen.reset();
+  smoother.reset();
+  if (game.busy) game.phase = "idle";
+  if (next !== "control") { el.control.checked = false; setControl(false); }
+  syncAvailability();
+  renderGame(NO_HAND);
+}
+
+/** Enable or disable controls that need a running camera or the Control mode. */
+function syncAvailability() {
+  el.control.disabled = !stream || mode !== "control";
+  el.gPlay.disabled = !stream;
+}
+
+/* ---- air draw */
+function updateSwatch() {
+  el.swatch.style.background = pen.color;
+  setText(el.swatchName, COLOR_NAMES[pen.colorIndex]);
+}
+function nextColor() {
+  pen.colorIndex = (pen.colorIndex + 1) % COLORS.length;
+  updateSwatch();
+}
+function markPaperUsed() {
+  if (paperUsed) return;
+  paperUsed = true;
+  el.paperEmpty.hidden = true;
+}
+function clearPaper() {
+  paper.clearRect(0, 0, el.paper.width, el.paper.height);
+  paperUsed = false;
+  el.paperEmpty.hidden = false;
+}
+function savePaper() {
+  const out = document.createElement("canvas");
+  out.width = el.paper.width; out.height = el.paper.height;
+  const o = out.getContext("2d");
+  o.fillStyle = "#0f1519"; o.fillRect(0, 0, out.width, out.height);
+  o.drawImage(el.paper, 0, 0);
+  out.toBlob((blob) => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "air-drawing.png";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+}
+function drawPenCursor(points, label, t) {
+  if (!points) return;
+  const w = el.overlay.width, h = el.overlay.height, tip = points[8];
+  ctx.beginPath();
+  ctx.arc(tip.x * w, tip.y * h, label === "Pointing" ? 9 : 13, 0, Math.PI * 2);
+  ctx.lineWidth = 3; ctx.strokeStyle = pen.color; ctx.fillStyle = pen.color;
+  if (label === "Pointing") ctx.fill(); else ctx.stroke();
+  const progress = pen.clearProgress(t);
+  if (progress > 0) { // ring that fills while an open palm is held to clear
+    const c = points[9];
+    ctx.beginPath();
+    ctx.arc(c.x * w, c.y * h, 34, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
+    ctx.lineWidth = 6; ctx.strokeStyle = "#fbbf24"; ctx.stroke();
+  }
+}
+function handleDraw(label, points, t) {
+  const tip = points ? { x: 1 - points[8].x, y: points[8].y } : null; // mirrored, as the user sees it
+  const { segment, events } = pen.update(label, tip, t);
+  if (segment) {
+    const W = el.paper.width, H = el.paper.height;
+    paper.strokeStyle = segment.color; paper.lineWidth = 6; paper.lineCap = "round"; paper.lineJoin = "round";
+    paper.beginPath();
+    paper.moveTo(segment.from.x * W, segment.from.y * H);
+    paper.lineTo(segment.to.x * W, segment.to.y * H);
+    paper.stroke();
+    markPaperUsed();
+  }
+  for (const ev of events) {
+    if (ev === "color") { updateSwatch(); flash(`Colour: ${COLOR_NAMES[pen.colorIndex]}`); }
+    else if (ev === "clear") { clearPaper(); flash("Cleared"); }
+    else if (ev === "save") { savePaper(); flash("Saved"); }
+  }
+  drawPenCursor(points, label, t);
+}
+
+/* ---- rock paper scissors */
+function renderGame(label) {
+  setText(el.gWin, String(game.score.win));
+  setText(el.gDraw, String(game.score.draw));
+  setText(el.gLose, String(game.score.lose));
+
+  let call = "Ready?", cls = "", vs = "Press Play round, then show your move when it says Shoot.";
+  if (game.phase === "countdown") { call = String(game.count); vs = "Get your hand ready."; }
+  else if (game.phase === "shoot") { call = "Shoot!"; cls = "go"; vs = "Hold your move."; }
+  else if (game.phase === "result") {
+    if (game.result === "none") { call = "No move seen"; vs = "Show Fist, Open Palm or Peace right after the countdown."; }
+    else {
+      call = game.result === "win" ? "You win" : game.result === "lose" ? "Computer wins" : "Draw";
+      cls = game.result === "draw" ? "" : game.result;
+      vs = `You: ${game.player}. Computer: ${game.cpu}.`;
+    }
+  }
+  setText(el.gCall, call);
+  el.gCall.className = `call ${cls}`.trim();
+  setText(el.gVs, vs);
+  setText(el.gSeen, stream ? (MOVES[label] ? `You are showing: ${MOVES[label]}` : "Show your hand") : "Start the camera to play");
+}
+function handleGame(label, t) {
+  if (game.busy) game.tick(t, label);
+  renderGame(label);
+}
+
 /* ---------------------------------------------------------------- camera + detection */
 let stream = null, landmarker = null, rafId = 0, connections = [];
 let controlOn = false, lastVideoTime = -1, fps = 0, lastFrame = performance.now();
@@ -167,8 +313,10 @@ async function startCamera() {
   }
   el.overlay.width = el.video.videoWidth || 640;
   el.overlay.height = el.video.videoHeight || 480;
-  el.placeholder.hidden = true; el.hud.hidden = false; el.stop.hidden = false; el.control.disabled = false;
+  el.placeholder.hidden = true; el.hud.hidden = false; el.stop.hidden = false;
   el.start.disabled = false; el.start.textContent = "Start camera";
+  syncAvailability();
+  renderGame(NO_HAND);
   lastVideoTime = -1;
   loop();
 }
@@ -181,7 +329,11 @@ function stopCamera() {
   smoother.reset(); highlightRow(null);
   el.placeholder.hidden = false; el.hud.hidden = true; el.stop.hidden = true;
   el.start.disabled = false; el.start.textContent = "Start camera";
-  el.control.checked = false; el.control.disabled = true; setControl(false);
+  el.control.checked = false; setControl(false);
+  pen.reset();
+  if (game.busy) game.phase = "idle";
+  syncAvailability();
+  renderGame(NO_HAND);
 }
 
 function drawHand(points) {
@@ -215,9 +367,15 @@ function loop() {
   el.gesture.classList.toggle("idle", label === NO_HAND || label === UNKNOWN);
   highlightRow(GESTURES.includes(label) ? label : null);
 
-  if (controlOn) {
-    const fired = controller.trigger(label);
-    if (fired) flash(fired.label);
+  if (mode === "control") {
+    if (controlOn) {
+      const fired = controller.trigger(label);
+      if (fired) flash(fired.label);
+    }
+  } else if (mode === "draw") {
+    handleDraw(label, points, now);
+  } else if (mode === "game") {
+    handleGame(label, now);
   }
 
   fps = fps ? fps * 0.9 + (1000 / Math.max(now - lastFrame, 1)) * 0.1 : 1000 / Math.max(now - lastFrame, 1);
@@ -254,7 +412,16 @@ document.addEventListener("keydown", (e) => {
 });
 window.addEventListener("pagehide", () => { if (stream) stopCamera(); });
 
+for (const b of el.modeTabs) b.addEventListener("click", () => setMode(b.dataset.mode));
+el.paperColor.addEventListener("click", nextColor);
+el.paperClear.addEventListener("click", clearPaper);
+el.paperSave.addEventListener("click", savePaper);
+el.gPlay.addEventListener("click", () => { if (stream && game.start(performance.now())) renderGame(NO_HAND); });
+el.gReset.addEventListener("click", () => { game.resetScore(); renderGame(NO_HAND); });
+
 buildDeck();
 buildGuide();
 applyVolume();
 el.fill.classList.remove("fired");
+updateSwatch();
+setMode("control");
